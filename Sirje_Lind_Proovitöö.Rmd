@@ -1,0 +1,350 @@
+---
+title: 'Geenivaramu proovitöö'
+output:
+  pdf_document: default
+  html_document: default
+date: "20 mai 2019"
+header-includes: \usepackage[utf8]{inputenc}
+---
+
+ **Sirje Lind**
+
+```{r setup, include=FALSE}
+library(magrittr)
+library(dplyr)
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# 1 Andmete importimine Ri 
+Algandmed olid xlsx  failina. 
+Failide sisu ei muutnud, kuid salvestasin faili .txt formaati, mille eraldajaks on tabulaator '(Tab delimited)(*.txt)'.
+
+## 1.1 Raviarvete import
+
+```{r}
+# arved <- read.table("C:\\Geenivaramu\\arved.txt", header = TRUE, sep = "\t")
+arved <- read.table(file.choose(), header = TRUE, sep = "\t")
+
+```
+
+ Arve tabeli korrastamine: koodi loetavuse huvides veergude nimede lühendamine
+```{r}
+
+colnames(arved)[colnames(arved)=="TreatmentBill.billStartDateOrig"] <- "Start"
+colnames(arved)[colnames(arved)=="TreatmentBill.billEndDateOrig"] <- "End"
+colnames(arved)[colnames(arved)=="TreatmentService.treatmentServiceOrig"] <- "Service"
+colnames(arved)[colnames(arved)=="TreatmentService.treatmentTimesOrig"] <- "Times"
+
+```
+
+Tunnuste formaatide korrastamine.
+```{r}
+
+arved$Start <- as.Date(arved$Start,"%Y/%m/%d")
+arved$End <- as.Date(arved$End,"%Y/%m/%d")
+arved$Duration <- difftime(arved$End,arved$Start, units = "days")+1
+arved$Service <- as.character(arved$Service)
+arved$Person <- as.character(arved$Person)
+arved$BillNr <- as.character(arved$BillNr)
+```
+
+Järgnevate tegevuste korrektuse tagammiseks ja lihtsustamiseks lisasin indikaatori Arverea_id.
+
+Raviteenuste koodide juures hakkas silma, et osadel koodidel olid oluliselt pikemad koodinumbrid. 
+Hinnkirja tabeliga võrreldes osutus, et tegemist on SAP koodiga. Samas kuna SAP kood erineb HKKOODist ainult prefiksina lisatud 0-de võrra, siis otsustasin muuta arvete baasis teenuste koode. Seega loobusin sidumisel keerukust lisava kahe tunnuse võrdlemisest. 
+```{r}
+arved$Arverea_id<- rownames(arved)
+arved$Service <- gsub("000000000000","",arved$Service)
+```
+## 1.2 Raviteenuste hinnakiri 
+Raviteenuste hinnakirja andmed exceli failina leidsin haigekassa lehelt 
+https://www.haigekassa.ee/partnerile/raviasutusele/tervishoiuteenuste-loetelu
+Faili link: https://www.haigekassa.ee/sites/default/files/TTL/2019/TORU_2019_20190322.xlsx
+Faili sisu ei muutnud. 
+```{r}
+#hinnad <- read.table("C:\\Geenivaramu\\hinnakiri2.txt",header = TRUE, sep = "\t", quote="", encoding="latin1")
+hinnad <- read.table(file.choose(), header = TRUE, sep = "\t", quote="", encoding="latin1")
+
+```
+
+```{r}
+
+hinnad$Alates <- as.Date(hinnad$ALATES_KUUP,"%d.%m.%Y")
+hinnad$Kuni <- as.Date(hinnad[,"KUNI_KUUP"],"%d.%m.%Y")
+hinnad$Kuni[is.na(hinnad$Kuni)] <-as.Date('9999-12-31', "%Y-%m-%d")  
+
+hinnad$HKKOOD <- as.character(hinnad$HKKOOD)
+hinnad$NIMETUS <- as.character(hinnad$NIMETUS)
+```
+
+Järgnevate tegevuste korrektuse tagammiseks ja lihtsustamiseks lisasin indikaatori Hinnad_id.
+Kuna Excelis oli hind formaadi, mis sisaldas tuhandete eraldajana tühikut, oli vaja hinna tesiendamiseks teha tekstiasendusi. 
+```{r}
+hinnad$Hinnad_id = rownames(hinnad)
+hinnad$Hind <- as.numeric(gsub(",",".",gsub(" ","",hinnad$HIND)))
+```
+
+Jätame alles ainult edasise jaoks olulised veerud. 
+```{r}
+
+hinnad<- hinnad[,c("Hinnad_id", "HKKOOD","Alates","Kuni","Hind","NIMETUS")]
+```
+
+# 2. Andmekvaliteedi kontrollimine 
+ 
+## 2.1 Hinakirjast puuduvad perioodi hinnad
+Tegin eelduse, see fail on kasutav väga paljude meditsiinivaldkonna analüütikute poolt ja seetõttu võiks see fail olla korrektne ja kvaliteedi kontrolle ei vaja. Kuid  osutus, see oli ekslik.
+
+Leidin raviarvest koode, mille kohta vastava perioodi hinnakiri puudub. 
+See tuleks täpsustada, kas on teenuseosutaja viga, või hinnakirja viga. 
+2015.aasta koodide puudumine tundub mulle hinnakirja veana. 
+
+HKKOOD|Ravi teenus                              |Kvaliteedive Selgitus
+------|-----------------------------------------|----------------------------------------
+210R  |Ägeda Südamelihaseinfarkti Trombolüütili |Hinnakirjas puuduvad 2015. aasta andmed 
+230R  |Botox (Üks Tü)                           |Hinnakirjas puuduvad 2015. aasta andmed 
+231R  |Sclerosis Multiplex-I Ägenemise Metüülpr |Hinnakirjas puuduvad 2015. aasta andmed 
+6001  |Sonograafiline Uuring                    |Puudub hinnakirjast. Lõpetati 30.06.2009
+6843  |Antigeeni Või -Kehade Kompleksne Analüü  |Puudub hinnakirjast. Lõpetati 31.12.2006
+6852  |Üld-Ige Määramine Kemiluminestsents (Lia |Puudub hinnakirjast. Lõpetati 31.12.2006
+66802 |Histoloogilise preparaadi 1 lisavärving .|Puudub hinnakirjast. Algab alles 15.11.2019
+
+Antud juhul arvete ridadega seoseid ei tekkinud ja nende koodidega nende perioodide teenused ei kajastu tulemustes. 
+
+## 2.2 Hinnakirjas piirkogus
+Hinnakirjas on tunnus HULK.Püüdsin aru saada, mis on selle tähendus ja kas mul on seda vaja. 
+Osutus, et see näitab *maksimaalset lubatud kogust* (voodipäevade arvu) ühe ühe raviarve piires.
+
+Raviarvete hulgas esineb arveid, kus TIMES on suurem, kui hinnakirjas lubatud HULK. 
+
+§ 14 lg 1 ütleb, et voodipäevade arv 'sama tervishoiuteenuse osutaja erinevates osakondades' ei tohi ületada ...eraldi ületada vastavat voodipäevade maksimumarvu'. 
+
+Kuna antud andmete puhul puudub võimalus hinnata kõiki nüansse, siis jätsin selle teema tähelepanuta. 
+Kahtluse korral tuleb sellised teemad ülesande püstitajaga täpsustda, mida niisuguste kirjetega teha. 
+
+## 2.3 Ühe Raviarve piires ühte teenust mitu korda
+Raviarvetes leidub teenuseid, mida esineb raviarves mitu korda. Kuna osadel oli teenuste osutamiste arv (Times) erinev, siis nendes ridades ei paista see veana.  
+Seega tuleks ülesande püstitajatga täpsustada, mida selliste ridadega teha.
+Praegu jätsin sisse. 
+
+## 2.4 Raviarvete read, kus korduste arv TIMES on ebarealistlik. 
+Tunnuse TIMES maksimaalne väärtus 66101 tundub liiga suur, et olla õiga. 
+Koostan teenuste kaupa statistika. Leian statistikud teenustele, mille korral maksimaalne esinemiste arv on suurem, kui 100   
+
+```{r}
+stat<- arved %>%
+  group_by(Service) %>% 
+  summarize(max_times=max(Times), mean_times=mean(Times), sd_times=sd(Times), count = n()) %>%
+    select(Service, mean_times,max_times, sd_times, count)%>%
+    arrange(desc(max_times))%>%  
+      filter(max_times>100)
+
+nimed <- hinnad%>%
+  group_by (HKKOOD)%>%
+  summarize (Nimi=max(NIMETUS))%>%
+  select(HKKOOD,Nimi)
+
+inner_join(stat,nimed, by= c("Service"="HKKOOD"), copy=FALSE) 
+
+```
+
+Selles tabelis viie esimese rea (HKKOOD) maksimum väärtused tunduvad kahtlased.  
+Samuti on nendes ridades standardhälve on suur (>100). 
+Nende lähemalt uurimiseks teen kaks funktsiooni: 
+1. etteantud HKKOODi jaoks tunnuse TIMES sagedustabeli 
+2. etteantud koodi maksimaalsete TIMES väärtustega raviarvete read. 
+Nende funktsioonide eesmärk on hinnata, kas TIMES väärtus on realistlik.
+```{r}
+## funktsioon, mis annab ravikoodi sagedustabeli  
+freq_code <- function(code){
+  sagedus<-arved %>% 
+    filter (Service==code)%>%
+    group_by(Times) %>% summarise(esinemissagedus = n()) %>%
+    arrange(desc(Times))%>% head(10)
+  
+  return(sagedus)
+}
+# funktsioon, mis annab arveread (Eespool suurema TIMES väärtustega read)
+using_code <- function(code){
+  esinemine<-arved %>% 
+    filter (Service==code)%>%
+    select(Arverea_id, BillNr,Start,End,Duration,Times)%>%
+    arrange(desc(Times))%>% head(3)
+  return(esinemine)  
+}
+```
+Analüüsin eespool toodud tabelist viite esimest koodi.
+
+### 2.4.1. Kood 6323
+
+```{r}
+freq_code("6323")
+using_code("6323")
+```
+Erinevus järgmisega on nii suur, see rida tundub vigasena ja kustutan.  
+```{r}
+arved <-subset(arved, Arverea_id!=696765)
+```
+
+### 2.4.2. Kood 6571
+
+```{r}
+freq_code("6571")
+using_code("6571")
+```
+Erinevus järgmisega on nii suur, see rida tundub vigasena ja kustutan. 
+```{r}
+arved <-subset(arved, Arverea_id!=622785)
+```
+
+### 2.4.3. Kood 6602
+
+```{r}
+freq_code("6602")
+using_code("6602")
+```
+Kahel esimesel real on erinevus järgmiste ridade on nii suur, et need read tunduvad vigasena ja kustutan.
+Raviarvete pikkused on 6 päeva ja 25 päeva
+```{r}
+arved <-subset(arved, Arverea_id!=874062)
+arved <-subset(arved, Arverea_id!=179480)
+```
+### 2.4.4. Kood 650L
+
+```{r}
+freq_code("6501L")
+using_code("6501L")
+```
+Erinevus järgmisega on nii suur.
+Raviarve pikkus on 9 päeva. 6506 korda teenust osutada ei ole realistlik
+See rida tundub vigasena ja kustutan. 
+```{r}
+arved <-subset(arved, Arverea_id!=839497)
+```
+### 2.4.5. Kood 6500B
+
+```{r}
+freq_code("6500B")
+using_code("6500B")
+```
+Erinevus järgmisega on nii suur, see rida tundub vigasena ja kustutan. 
+```{r}
+arved <-subset(arved, Arverea_id!=903938)
+```
+
+### 2.4.6. Andmekvaliteedi kokkuvõte
+Nii suurte andmestike korral tuleb pärast kvaliteedivigade tuvastamist hinnata ka vea mõju tulemusele.
+Kui viga esineb väga vähe ja see ei mõjuta otseselt tulemust, ning vea parandamisel kuluv aeg on suur, siis ei pea vea parandamisele aega kulutama. 
+Kuid eeltoodud näidetest 6000 kordne erinevus vajab siiski tähelepanu.  
+
+Kuid üldine suund peaks olema andmekvaliteedi haldusel, st kvaliteetsete andmete tagamise korraldamisel, mitte niivõrd üksikute vigade parandamisel.  
+
+# 3. Andmestike sidumine
+
+Ühendame kaks tabelit teenue koodi järgi. 
+
+```{r}
+abi_join<-full_join (arved, hinnad, by=c("Service"="HKKOOD"), copy=FALSE) 
+```
+
+Tulemuseks on suur tabel, millest on vaja perioodide sobivuse järgi eraldada ainult õiged read. 
+Kuupäevade vaatlemisel osutus, et leidub arveridu, mille hinnakiri muutub/ algab või lõppeb raviarve keskel. 
+Seetõttu esimese joiniga võtan kõik hinnakirja read, millel vähemalt üks päev kattub raviarve perioodiga. 
+```{r}
+abi_join <- abi_join %>%
+  filter ((Start>=Alates &  Start<=Kuni) | (End>=Alates &  End<=Kuni))%>%
+  mutate (Kulu=Times*Hind) 
+```
+ Kuid selles tabelis on paljude arvete kohta kaks rida. 
+ Jätame ainult ühe hinnakirja rea: Uuema, mille hinnakirja_ID on suurem. 
+Seega on tulemustes hinnad pigem hinnatud kõrgemaks.  
+ 
+```{r}
+abi_uniq<- abi_join  %>%
+  group_by(Arverea_id, Service) %>%
+  summarize(Hinnad_max_id=max(Hinnad_id)) %>%
+  select (Arverea_id, Hinnad_max_id)
+
+# korduste välja viskamine
+tulem<-inner_join(abi_join ,abi_uniq, by=c("Arverea_id"="Arverea_id", "Hinnad_id"="Hinnad_max_id"), copy=TRUE)
+head(tulem)
+
+```
+# 3.1 ühendamise tulemuset kontrollimine 
+
+Ideaalsel juhul peaks meil olema nüüd ühendatud tabelis sama palju ridu, kui arvete tabelis. 
+Kvaliteedi kontrolidega visaksime väja 6 rida.
+
+
+```{r}
+nrow(arved)
+nrow(tulem)
+```
+
+```{r}
+erinevus <- anti_join(arved,tulem, by="Arverea_id")
+```
+Erinevus on 18 rida. 
+Erinevuse analüüsil osutus, et raviarvetele ei leitud vasteid hinnakirjas (vt punkt 2.1.) 
+Jätan nii ja lähen arvutama. 
+
+# 4. Tulemused
+## 4.1 Raviarved 
+Esmalt tekitame raviarvete loetelu
+```{r}
+raviarved <- tulem %>%
+  group_by (Person,BillNr) %>%
+  summarize(ArveKulu = sum(Kulu), ArveKestus=mean(Duration), ArveRidu=n()) %>%  
+  select(Person,BillNr, ArveKulu, ArveKestus, ArveRidu)
+  
+kable(head(raviarved), caption = "Raviarvete abitabeli näide",padding=3)
+```
+
+## 4.2 Isikute kaupa  statistika
+
+Proovitöö ülesanne1:
+Soovime teada iga andmefailis toodud inimese kohta tema raviteenustele kulunud summat, keskmist raviarve kestvust.
+```{r}
+tulem_isik <- raviarved %>%
+  group_by (Person) %>%
+  summarize(IsikuRaviKulu = sum(ArveKulu), 
+            KeskmineArveKestus=format(mean(ArveKestus),digits=2), Raviarveid=n()) %>%    
+  select(Person, IsikuRaviKulu, KeskmineArveKestus) 
+
+kable(head(tulem_isik), caption = "Isikute raviteenuste summa ja keskmine arve pikkus (esimesed  6 isikut)",padding=3)
+
+```
+
+## 4.3 Kolm kulukamat raviarvet
+Proovitöö ülesanne2 :
+Soovime teada kolme kulukaimat raviarvet ning nendes sisalduvate raviteenuste nimesid.
+
+```{r}
+tulem_top3_arved <- raviarved[order(-raviarved$ArveKulu),][1:3,] 
+tulem_top3_arved$ArveKulu <- format(tulem_top3_arved$ArveKulu,big.mark=" ", decimal.mark=",")
+
+kable(tulem_top3_arved, caption = "Kolm kulukamat raviarvet",padding=3)
+```
+
+Unikaalseid nimesid on vähem 
+
+```{r}
+tulem_top3_arveread<-merge(tulem, tulem_top3_arved, by=c("BillNr"), copy=FALSE) %>%
+  select (BillNr,NIMETUS) %>% 
+  distinct%>%
+  arrange(BillNr,NIMETUS)
+```
+
+
+```{r}
+tulem_top3_arveread_unikaalsed<-tulem_top3_arveread %>%
+  distinct%>%
+  group_by (BillNr) %>%
+  summarize(unikaalseid = n())
+  
+kable(tulem_top3_arveread_unikaalsed, caption = "Kolm kulukama raviarve unikaalsete teenuste nimetuste arv",padding=3)
+
+kable(tulem_top3_arveread, caption = "Kolm kulukama raviarve teenuste nimed",padding=3)
+```
